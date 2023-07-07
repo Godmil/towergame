@@ -2,25 +2,368 @@ pico-8 cartridge // http://www.pico-8.com
 version 41
 __lua__
 
+function downwardscollision(player1,allbricks)
+end
+
+--[[function createcharacter(x0,y0)
+	local character = {
+		x = x0,
+		y = y0,
+		w = 4,
+		h = 6,
+		moving = "still",
+		jumping = "still",
+		upforce = 0,
+		xspeed = 5,
+		dx = 0,
+		dy = 0,
+		charworldx = 0,
+		charworldy = 0,
 
 
-flattocylinder = function(x,radius0)
+
+		move = function(self)
+			self.charworldx = 0
+			self.charworldy = 0
+
+
+
+			if btn(0) then 
+				self.moving = "left"
+			elseif btn(1) then 
+				self.moving = "right"
+			end
+
+			if(self.jumping == "still") then
+				if(btn(4)) then
+					self.upforce = 100
+					self.jumping = "jump"
+				end
+			end
+
+
+
+
+
+		end,
+
+		draw = function(self)
+			rectfill(self.x, self.y+self.h, self.x+self.w, self.y, 8)
+		end
+
+
+	}
+	return character
+end]]
+
+function coll_tile(...)
+	return false
+end
+
+function coll_floor(x,y)
+	for br in all(bricks) do
+		if(br.x > x+8) return false
+		if(br.x+16 < x) return false
+		if(br.y > y+8) return false
+		if(br.y+8 < y) return false
+
+		--bug test
+		if (y >128) return true
+		return true
+	end
+
+
+	return false
+end
+
+function createcharacter(x0, y0)
+ local player = {
+  -----------------------------
+  --player starting variables--
+  -----------------------------
+  x = x0 or 64, --starting x coordinate
+  y = y0 or 64, --startomg y coordinate
+  framecounter = 0, --counter for animations
+  speed = 0.4, --runspeed
+  normalspeed = 2, --defines normal running speed
+  runspeed = 3, --defines max run speed while holding run button
+  rateofacceleration = 0.1, --determines how quickly to change between normal and run speed
+  maxspeed = 2, -- max run speed used to calculate movement
+  jumpingspeed = 6, --initial jumping speed
+  velx = 0, --current speed on x axis
+  vely = 0, --current speed on y axis
+  jumping = false, --has the player started jumping (moving up)
+  falling = false, --is the player falling (moving down)
+  sprite = 144, --start sprite number
+  moving = false, --is the player moving on x axis
+  jumpreset = true, --lock to stop jumping again until ready
+  stick = false, -- is the player sliding down a wall
+  dontteleport = false,
+  timer = 0, --general timer, used for pauses like on death or level complete
+  removecontrol = false, --used to stop player input, like on level complete or death
+  
+  --------------------
+  --player functions--
+  --------------------
+
+  --slows down the player to a stop
+  stopping = function(self)
+   if(not self.jumping and not self.falling) then
+    self.velx /= 1.5
+   else
+    self.velx /= 1.2 --less drag if in air
+   end
+   
+   if ((self.velx > -0.05) and (self.velx < 0.05)) then
+    self.velx = 0
+   end
+  end,
+
+  ----------------------------------
+  -- function that governs all the player movement--
+  -- starting with some controls, then dealing with y-axis
+  -- then x-axis movement
+  ---------------------------------
+
+  move = function(self)
+
+   --check to see if you should be falling
+   if(not self.jumping and not coll_floor(self.x, self.y+9)) then
+    self.falling = true
+   else
+    self.stick = false --stops stick when hitting the ground
+   end
+
+   --run button (needs to check if falling first or it can be set when bumping your head)
+   if(btn(4) and (not self.jumping) and (not self.falling)) then --cant change in midair
+    if(self.maxspeed < self.runspeed) then
+     self.maxspeed += self.rateofacceleration
+    end
+    --self.jumpingspeed = 9
+   elseif ((self.jumping == false) and (self.falling == false)) then
+    if (self.maxspeed > self.normalspeed) then
+     self.maxspeed -= self.rateofacceleration
+    end
+    --self.jumpingspeed = 8
+   end
+
+
+   --jump
+   if(not btn(5)) then -- stops holding the jump button down
+    self.jumpreset = true
+   end
+
+   if(not self.jumping) and ((not self.falling) or self.stick) and self.jumpreset and btn(5) then
+    self.jumping = true
+    
+    self.falling = false --fixes stick jump thinking your falling and jumping at the same time
+    self.jumpreset = false
+
+    self.vely = 0 -- reset vely - important if jumping from stick
+    if self.stick then
+     
+     if( self.facing == 'left') then
+      self.velx += self.speed*20 --move away from the wall
+     else
+      self.velx -= self.speed*20
+     end
+
+     self.vely = 0 --fixes bug that causes a jump from a large fall to have huge velocity
+     self.vely += self.jumpingspeed/2 --smaller jump from stick
+     
+    else
+     self.vely += self.jumpingspeed --normal jump
+    end
+    sfx(1) --play jump sound
+   end
+
+   if self.jumping and (not self.removecontrol) then
+    local newy = self.y - self.vely
+    self.vely -= gravity
+    
+    if(newy >= self.y) then -- check to see if reached top of jump
+     self.jumping = false
+     self.falling = true
+    end
+
+    --jump through platform fix
+    if(coll_tile(self.x, newy,1)) then
+     self.dontteleport = true
+    end
+
+    if(coll_tile(self.x, newy)) then
+     local fix = 1
+     while coll_tile(self.x, newy + fix) do
+      fix += 1  
+     end
+     self.y = newy + fix
+     --self.falling = true
+     self.jumping = false
+     self.vely = 0
+    else
+     self.y = newy
+    end
+   end
+
+
+   if self.falling then
+    if(self.stick) then
+     self.vely += gravity/4
+    else
+     self.vely += gravity
+    end
+
+    local newy = self.y + self.vely
+    if(coll_tile(self.x, newy)) or (coll_tile(self.x, newy, 1) and not self.dontteleport) then
+     --backtrack until not colliding
+     local fix = 1
+     while (coll_tile(self.x, newy - fix) or (coll_tile(self.x, newy - fix, 1))) do
+      fix += 1  
+     end
+     self.y = newy - fix
+     self.falling = false
+     self.vely = 0
+    else
+     self.y = newy
+    end
+   end
+
+
+   --move sideways
+   if btn(1) or btn(0) and (not self.removecontrol) then
+    --move right
+    if btn(1) and not btn(0) then 
+     self.facing = "right"
+     self.velx += self.speed
+    end
+    --move left
+    if btn(0) and not btn(1) then
+     self.facing = "left"
+     self.velx -= self.speed
+    end
+    
+    --speed limit
+    if (self.velx > self.maxspeed) then
+     self.velx = self.velx - (self.velx - self.maxspeed)/2
+    elseif (self.velx < -self.maxspeed) then
+     self.velx = self.velx + (abs(self.velx) - self.maxspeed )/2
+    end
+
+   else
+    self:stopping()
+   end
+   
+   
+
+   if(self.velx > 0) or (self.velx < 0)then
+    self.moving = true
+    --self.sprite = 1
+   else
+    self.moving = false
+    --self.sprite = 1
+   end
+
+   if (self.moving == true) then
+    local newx = self.x + self.velx
+    --(if moving right)
+    if (newx > self.x) then 
+     if(coll_tile(newx, self.y)) then
+      local fix = 1
+      while coll_tile(newx - fix, self.y) do
+       fix += 1  
+      end
+      self.x = newx - fix
+      self.velx = 0
+     else
+      self.x = newx
+     end
+
+      --sticking to wall
+      if self.falling and coll_tile(self.x+1, self.y) then
+       self.stick = true
+       --check to see if hit ground doesn't work
+       if(coll_tile(self.x, self.y+1)) then
+        self.falling = false
+        self.stick = false
+       end
+      else
+       self.stick = false
+      end
+
+      -- if moving left
+    elseif (newx < self.x) then
+     if(coll_tile(newx, self.y)) then
+      local fix = 1
+      while coll_tile(newx + fix, self.y) do
+       fix += 1  
+      end
+      self.x = newx + fix
+      self.velx = 0
+
+     else
+      self.x = newx
+     end
+
+      --sticking to wall
+      if self.falling and coll_tile(self.x-1, self.y) then
+       self.stick = true
+       --check to see if hit ground doesn't work
+       if(coll_tile(self.x, self.y+1)) then
+        self.falling = false
+        self.stick = false
+       end
+      else
+       self.stick = false
+      end
+    end
+   end
+
+   return self.x%360 --send to worldx coordinate
+  end,
+
+  draw=function(self)
+   if (self.jumping == true) then
+    self.sprite = 146
+   elseif (self.stick == true) then
+    self.sprite = 147
+   elseif (self.moving == true) then
+   --animate walking
+    self.sprite = 1+(self.framecounter/3)%2
+    self.framecounter +=1
+    if(self.framecounter >= 1000) self.framecounter = 0
+   else
+    self.sprite = 144 -- stationary
+   end
+   --draw the player facing the correct way
+   if(self.facing == "right") then
+    spr(self.sprite, 60, self.y)
+   else
+    spr(self.sprite, 60, self.y,1,1,true) 
+   end
+  end,
+
+ }
+ return player
+end
+
+function flattocylinder(x,radius0)
 	local radius = radius0 or 50
 	return 64+sin(x/360)*radius
 end
 
-createledge = function(x0,y0)
+function createledge(x0,y0)
 end
 
-ledgefwidth = function(x)
+function ledgefwidth(x)
 	--print(cos((x-180)/360)*16)
 	return cos((x-180)/360)*16
 end
-ledgesidewidth = function(x)
+
+function ledgesidewidth(x)
 	return sin((x-180)/360)*4
 end
 
-brickslice = function(x0,y0,offset0)
+function brickslice(x0,y0,offset0)
 	local slice = {
 		x=x0,
 		y=y0,
@@ -34,11 +377,10 @@ brickslice = function(x0,y0,offset0)
 			spr((flr(self.offset%8))*16,self.x,self.y,13,1)
 		end,
 	}
-
 	return slice
 end
 
-drawhills = function(height, xscale, yscale, offset, colour, highlight, highlightcolour)
+function drawhills(height, xscale, yscale, offset, colour, highlight, highlightcolour)
 	local lastheight = height+sin(((worldx)/1000)*xscale+offset)*yscale
 	for x = 0,127 do
 		local hillheight = height+sin(((worldx+x)/1000)*xscale+offset)*yscale
@@ -48,8 +390,13 @@ drawhills = function(height, xscale, yscale, offset, colour, highlight, highligh
   		end
 		lastheight = hillheight
 		--if(x == 0) ?hillheight
+
+		--poke(0x5f38,2)
+		--poke(0x5f39,2)
+		--for x = 0, 127 do
+		 --tline(x,0,x,127,(x%16)/8,(x%16)/8)
+		--lend
 	end
-	
 end
 
 function brick(x0,y0,connected)
@@ -66,9 +413,13 @@ function brick(x0,y0,connected)
 
 		draw = function(self)
 			local rotationposition = (x0+worldx)%360
+			local leftsidefix = 4-((rotationposition-90)/90)*4
 			local rightsideface = ledgefwidth(rotationposition)-0.5
 			if(rightsideface) <0.5 rightsideface = 0.5
-			if rotationposition > 90 and rotationposition <280 then 
+			if rotationposition > 90 and rotationposition <180 then 
+				sspr(0,64,16,8,flr(self.x+0.5),self.y,ledgefwidth(rotationposition)+leftsidefix,8)
+			end
+			if rotationposition >= 180 and rotationposition <280 then 
 				sspr(0,64,16,8,flr(self.x+0.5),self.y,ledgefwidth(rotationposition),8)
 			end
 
@@ -85,8 +436,6 @@ function brick(x0,y0,connected)
 			end
 			--print(self.x, 10,10,7)
 		end,
-
-
 	}
 	return singlebrick
 end
@@ -133,6 +482,7 @@ function _init()
 	bricks = {}
 
 	xspeed = 1
+	gravity = -9.8
 
 	for i = -16,24 do
 		add(slices,brickslice(14,i*8,flr(i%2)*4))
@@ -141,6 +491,8 @@ function _init()
 	testoffset = 0
 	backgroundx = 0
 	worldx = 0
+
+	player = createcharacter(64,64)
 
 	
 	--add(bricks, testbrick(0,40))
@@ -177,21 +529,20 @@ function _update60()
 		br:move()
 	end
 
+	worldx = player:move()
+
 	--myfirstsort(bricks)
 
-	if(btn(0)) worldx += xspeed
-	if(btn(1)) worldx -= xspeed
-
-	if(worldx >= 360) worldx -= 360
-	if(worldx < 0) worldx += 360 
+	--if(btn(0)) worldx += xspeed
+	--if(btn(1)) worldx -= xspeed
 
 end
 
 function _draw()
 	cls(12)
 	
-	drawhills(50,20,5,worldx+0.6,13,true,6)
-	drawhills(64,10,10,worldx,3,true,11)
+	drawhills(50,20,5,worldx/1000+0.6,13,true,6)
+	drawhills(64,10,10,worldx/1000,3,true,11)
 
 	for sl in all(slices) do
 		sl:draw()
@@ -201,6 +552,8 @@ function _draw()
 	for br in all(bricks) do
 		br:draw()
 	end
+
+	player:draw()
 
 	--[[if(worldx>800 and worldx<3400) then
 		--rect(flattocylinder(worldx)-8,64,flattocylinder(worldx)+8,72,7)
@@ -285,6 +638,30 @@ dd6dd666d6666d66d66dd66d66ddd6ddddddddddddd55dd5555555dd5555555d5555515551555155
 28228888222222218888888811111111000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 88288118222222288999989811111888000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 22222111122222229899989911111888000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+09999990099999900999999000099900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+92222229922222299222222900922290000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+92292929922929299229292909292229000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+92222229922222299222222992922290000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+92222229922222299222222992222999000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+09999990099999900999999009229909000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00900900099009090090090000990999000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+00990990090000900900900000000009000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+44444444cccccccc0555555555555550051111000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+44444444cccccccc5666666666666665059999900000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+44544444cccccccc000000000000000005bbbbbb0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+44444544cccccccc000000000000000005aaaaa00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+44444444cccccccc000000000000000005eeee000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+44444444cccccccc0000000000000000050000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+44444444cccccccc0000000000000000050000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+54444444cccccccc0000000000000000555000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+dddddddd00000000d000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+ddddd5d500000000dd00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+dd5ddddd00000000dd00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+5ddddddd000000005dd0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+dddd5ddd000dd000dddd000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+dddddddd00dddd00d5dddd0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+d5dd5ddd0dddd5d0ddddddd000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+ddddddd5dd5dddddddd5dddd00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
 __label__
 77cc777c7c7ccccc777d777d77767d7666dd6d6666ddddd66ddddddd665dddddddd5ddddddd55ddddddd55dd5dd55ddddd55dd5d5555d555555ccccccccccccc
 c7cc7c7c7c7ccccc7d7d767d76767d76666d666666dd6d666d5dddd6dd55ddddddd55dddddd555d5ddd555555555155555515555511551111111cccccccccccc
@@ -415,3 +792,6 @@ bb33333333333333dd6dd66d6666dd6666dd6d6666ddddd677777777777777777dd5ddddddd55ddd
 3333333333333333ddddddd6d66d6dd66d66dd66ddddddddddddd5dd5ddd555d55555555d5555515d51555115515511551111151111111111111333333333333
 333333333333333335555d5d5dd55d5dd55d55dd51dd15d5115515d5111511551111511551115111511111115111111551111111111111111111333333333333
 
+__gff__
+0000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
+0000000000000000000000000000000000000000000000000000000000000000010002020400000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000
