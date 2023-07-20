@@ -2,78 +2,68 @@ pico-8 cartridge // http://www.pico-8.com
 version 41
 __lua__
 
-function downwardscollision(player1,allbricks)
-end
-
---[[function createcharacter(x0,y0)
-	local character = {
-		x = x0,
-		y = y0,
-		w = 4,
-		h = 6,
-		moving = "still",
-		jumping = "still",
-		upforce = 0,
-		xspeed = 5,
-		dx = 0,
-		dy = 0,
-		charworldx = 0,
-		charworldy = 0,
-
-
-
-		move = function(self)
-			self.charworldx = 0
-			self.charworldy = 0
-
-
-
-			if btn(0) then 
-				self.moving = "left"
-			elseif btn(1) then 
-				self.moving = "right"
-			end
-
-			if(self.jumping == "still") then
-				if(btn(4)) then
-					self.upforce = 100
-					self.jumping = "jump"
-				end
-			end
-
-
-
-
-
-		end,
-
-		draw = function(self)
-			rectfill(self.x, self.y+self.h, self.x+self.w, self.y, 8)
-		end
-
-
-	}
-	return character
-end]]
 
 function coll_tile(...)
 	return false
 end
 
-function coll_floor(x,y)
+function coll_leftwall(xoffset,y)
 	for br in all(bricks) do
-		if(br.x > x+8) return false
-		if(br.x+16 < x) return false
-		if(br.y > y+8) return false
-		if(br.y+8 < y) return false
+		if(br.x+br.width > 59+xoffset+bugtest) and (br.x+br.width < 67+xoffset) and br.infront then
+			if(br.y > y-7 and br.y <= y) then --minus 1 fixes slides down walls
+				br.canbecollider = true
+				return true
+			end
+		end
+	end
+	return false
+end
 
-		--bug test
-		if (y >128) return true
-		return true
+function coll_rightwall(xoffset,y)
+	for br in all(bricks) do
+		if(br.x > (64+xoffset)) and (br.x < (67+xoffset)) and br.infront then
+			if(br.y >= y and br.y <= y+7) then 
+				br.canbecollider = true
+				return true
+			end
+		end
+	end
+	return false
+end
+
+function coll_floor(y)
+	for br in all(bricks) do
+		if(br.x+br.width > 60) and (br.x < 66) and br.infront then
+			if(br.y > y+4 and br.y < y+8) then --if this isn't 8 then the side colliders dont work.
+				br.canbecollider = true
+				return true
+			end
+		end
+	end
+	return false
+end
+
+function coll_ceiling(y)
+	for br in all(bricks) do
+		if(br.x + br.width >= 60) and (br.x <= 66) and br.infront then
+			if(br.y >= y-8 and br.y < y) then
+				br.canbecollider = true
+				return true
+			end
+		end
+	end
+	return false
+end
+
+
+function cameraheight(player)
+	if(player.y+worldy <= 30) then
+		worldy += flr(abs(player.y+30-worldy)/100)
 	end
 
-
-	return false
+	if(player.y+worldy >= 80) then
+		worldy -= flr(abs(player.y+80-worldy+128)/100)
+	end
 end
 
 function createcharacter(x0, y0)
@@ -81,15 +71,15 @@ function createcharacter(x0, y0)
   -----------------------------
   --player starting variables--
   -----------------------------
-  x = x0 or 64, --starting x coordinate
-  y = y0 or 64, --startomg y coordinate
+  x = x0 or 60, --starting x coordinate
+  y = y0 or 60, --startomg y coordinate
   framecounter = 0, --counter for animations
   speed = 0.4, --runspeed
-  normalspeed = 2, --defines normal running speed
-  runspeed = 3, --defines max run speed while holding run button
+  normalspeed = 0.2, --defines normal running speed
+  runspeed = 0.3, --defines max run speed while holding run button
   rateofacceleration = 0.1, --determines how quickly to change between normal and run speed
-  maxspeed = 2, -- max run speed used to calculate movement
-  jumpingspeed = 6, --initial jumping speed
+  maxspeed = 0.2, -- max run speed used to calculate movement
+  jumpingspeed = 3, --initial jumping speed
   velx = 0, --current speed on x axis
   vely = 0, --current speed on y axis
   jumping = false, --has the player started jumping (moving up)
@@ -101,225 +91,262 @@ function createcharacter(x0, y0)
   dontteleport = false,
   timer = 0, --general timer, used for pauses like on death or level complete
   removecontrol = false, --used to stop player input, like on level complete or death
+  facing = "right",
+  unstickcounter = 0, --used for the pause when pushing the opposite direction while stuck to a wall before falling off
   
   --------------------
   --player functions--
   --------------------
 
-  --slows down the player to a stop
-  stopping = function(self)
-   if(not self.jumping and not self.falling) then
-    self.velx /= 1.5
-   else
-    self.velx /= 1.2 --less drag if in air
-   end
-   
-   if ((self.velx > -0.05) and (self.velx < 0.05)) then
-    self.velx = 0
-   end
-  end,
+	--slows down the player to a stop
+	stopping = function(self)
+		if(not self.jumping and not self.falling) then
+			self.velx /= 1.5
+		else
+			self.velx /= 1.2 --less drag if in air
+		end
+	 
+		if ((self.velx > -0.05) and (self.velx < 0.05)) then
+			self.velx = 0
+		end
+	end,
 
-  ----------------------------------
-  -- function that governs all the player movement--
-  -- starting with some controls, then dealing with y-axis
-  -- then x-axis movement
-  ---------------------------------
+	----------------------------------
+	-- function that governs all the player movement--
+	-- starting with some controls, then dealing with y-axis
+	-- then x-axis movement
+	---------------------------------
 
-  move = function(self)
+	move = function(self)
 
-   --check to see if you should be falling
-   if(not self.jumping and not coll_floor(self.x, self.y+9)) then
-    self.falling = true
-   else
-    self.stick = false --stops stick when hitting the ground
-   end
+		--check to see if you should be falling
+		if(not self.jumping and not coll_floor(self.y+1)) then
+			self.falling = true
+		else
+			self.stick = false --stops stick when hitting the ground
+		end
 
-   --run button (needs to check if falling first or it can be set when bumping your head)
-   if(btn(4) and (not self.jumping) and (not self.falling)) then --cant change in midair
-    if(self.maxspeed < self.runspeed) then
-     self.maxspeed += self.rateofacceleration
-    end
-    --self.jumpingspeed = 9
-   elseif ((self.jumping == false) and (self.falling == false)) then
-    if (self.maxspeed > self.normalspeed) then
-     self.maxspeed -= self.rateofacceleration
-    end
-    --self.jumpingspeed = 8
-   end
+		--move sideways
+		if btn(1) or btn(0) and (not self.removecontrol) then
+	    
+		   	if(self.stick and (self.unstickcounter < 15)) then
+		   		--code to delay your falling off the wall while walljumping if you push the opposite direction
+		   		if self.facing == "left" then
+			   		if(btn(1)) then
+			   			self.unstickcounter += 1
+			   		else
+			   			self.unstickcounter = 0
+			   		end
+		   		else
+			   		if(btn(0)) then
+			   			self.unstickcounter += 1
+			   		else
+			   			self.unstickcounter = 0
+			   		end
+		   		end
+		   		--if(not coll_rightwall(bugtest,self.y) and not coll_leftwall(bugtest,self.y)) self.stick = false
+		   	else
+		   		--reset
+		   		self.stick = false
+		   		self.unstickcounter = 0
+
+			    --move right
+			    if btn(1) and not btn(0) then 
+			     self.facing = "right"
+			     self.velx += self.speed
+			    end
+
+			    --move left
+			    if btn(0) and not btn(1) then
+			     self.facing = "left"
+			     self.velx -= self.speed
+			    end
+			    
+			    --speed limit
+			    if (self.velx > self.maxspeed) then
+			     self.velx = self.velx - (self.velx - self.maxspeed)/2
+			    elseif (self.velx < -self.maxspeed) then
+			     self.velx = self.velx + (abs(self.velx) - self.maxspeed )/2
+			    end
+			end
+		else
+			self:stopping()
+		end
+	  
+		if(self.velx > 0) or (self.velx < 0)then
+			self.moving = true
+			--self.sprite = 1
+		else
+			self.moving = false
+			--self.sprite = 1
+		end
+
+		--undo stick if falled off edge of wall
+		--if(not coll_rightwall(bugtest,self.y) and not coll_leftwall(bugtest,self.y)) self.stick = false
+
+		if (self.moving == true) then
+			local newx = self.x + self.velx
+
+			--(if moving right)
+			if (newx > self.x) then 
+				if(coll_rightwall(0, self.y)) then
+					local fix = -1
+					while coll_rightwall(fix, self.y) do
+						fix -= 1
+						correction = fix
+					end
+					self.x = ceil(newx + fix)
+					self.velx = 0
+				else
+					self.x = ceil(newx)
+				end
+
+					--sticking to wall
+				if self.falling and coll_rightwall(1, self.y) then
+					self.stick = true
+					--check to see if hit ground doesn't work
+					if(coll_floor(self.y+8)) then
+						self.falling = false
+						self.stick = false
+					end
+				else
+					self.stick = false
+				end
+
+		    -- if moving left
+		    elseif (newx < self.x) then
+			    if(coll_leftwall(0, self.y)) then
+			     local fix = 1
+			     while coll_leftwall(fix, self.y) do
+			      fix += 1  
+			     end
+			     self.x = flr(newx + fix)
+			     self.velx = 0
+			    else
+			     self.x = flr(newx)
+			    end
+
+			    --sticking to wall
+			    if self.falling and coll_leftwall(-1, self.y) then
+			     self.stick = true
+			     --check to see if hit ground doesn't work
+			     if(coll_floor(self.y+8)) then
+			      self.falling = false
+			      self.stick = false
+			     end
+			    else
+			     self.stick = false
+			    end
+		    end
+		end
 
 
-   --jump
-   if(not btn(5)) then -- stops holding the jump button down
-    self.jumpreset = true
-   end
 
-   if(not self.jumping) and ((not self.falling) or self.stick) and self.jumpreset and btn(5) then
-    self.jumping = true
-    
-    self.falling = false --fixes stick jump thinking your falling and jumping at the same time
-    self.jumpreset = false
-
-    self.vely = 0 -- reset vely - important if jumping from stick
-    if self.stick then
-     
-     if( self.facing == 'left') then
-      self.velx += self.speed*20 --move away from the wall
-     else
-      self.velx -= self.speed*20
-     end
-
-     self.vely = 0 --fixes bug that causes a jump from a large fall to have huge velocity
-     self.vely += self.jumpingspeed/2 --smaller jump from stick
-     
-    else
-     self.vely += self.jumpingspeed --normal jump
-    end
-    sfx(1) --play jump sound
-   end
-
-   if self.jumping and (not self.removecontrol) then
-    local newy = self.y - self.vely
-    self.vely -= gravity
-    
-    if(newy >= self.y) then -- check to see if reached top of jump
-     self.jumping = false
-     self.falling = true
-    end
-
-    --jump through platform fix
-    if(coll_tile(self.x, newy,1)) then
-     self.dontteleport = true
-    end
-
-    if(coll_tile(self.x, newy)) then
-     local fix = 1
-     while coll_tile(self.x, newy + fix) do
-      fix += 1  
-     end
-     self.y = newy + fix
-     --self.falling = true
-     self.jumping = false
-     self.vely = 0
-    else
-     self.y = newy
-    end
-   end
+		--run button (needs to check if falling first or it can be set when bumping your head)
+		--[[
+		if(btn(4) and (not self.jumping) and (not self.falling)) then --cant change in midair
+			if(self.maxspeed < self.runspeed) then
+				self.maxspeed += self.rateofacceleration
+			end
+			--self.jumpingspeed = 9
+		elseif ((self.jumping == false) and (self.falling == false)) then
+			if (self.maxspeed > self.normalspeed) then
+				self.maxspeed -= self.rateofacceleration
+			end
+			--self.jumpingspeed = 8
+		end
+		]]
 
 
-   if self.falling then
-    if(self.stick) then
-     self.vely += gravity/4
-    else
-     self.vely += gravity
-    end
+		--jump
+		if(not btn(5)) then -- stops holding the jump button down
+			self.jumpreset = true
+		end
 
-    local newy = self.y + self.vely
-    if(coll_tile(self.x, newy)) or (coll_tile(self.x, newy, 1) and not self.dontteleport) then
-     --backtrack until not colliding
-     local fix = 1
-     while (coll_tile(self.x, newy - fix) or (coll_tile(self.x, newy - fix, 1))) do
-      fix += 1  
-     end
-     self.y = newy - fix
-     self.falling = false
-     self.vely = 0
-    else
-     self.y = newy
-    end
-   end
+		if(not self.jumping) and ((not self.falling) or self.stick) and self.jumpreset and btn(5) then
+			self.jumping = true
+	    
+			self.falling = false --fixes stick jump thinking your falling and jumping at the same time
+			self.jumpreset = false
+
+			self.vely = 0 -- reset vely - important if jumping from stick
+			if self.stick then
+	     
+				if( self.facing == 'left') then
+					self.velx += self.speed*20 --move away from the wall
+				else
+					self.velx -= self.speed*20
+				end
+
+				self.vely = 0 --fixes bug that causes a jump from a large fall to have huge velocity
+				self.vely += self.jumpingspeed/2 --smaller jump from stick
+	     
+			else
+				self.vely += self.jumpingspeed --normal jump
+			end
+			--sfx(1) --play jump sound
+		end
+
+		if self.jumping and (not self.removecontrol) then
+			local newy = self.y - self.vely
+			self.vely -= gravity
+	    
+			if(newy >= self.y) then -- check to see if reached top of jump
+				self.jumping = false
+				self.falling = true
+			end
+
+			if(coll_floor(newy)) then
+				local fix = 1
+				while coll_floor(newy + fix) do
+					fix += 1  
+				end
+				self.y = newy + fix
+				--self.falling = true
+				self.jumping = false
+				self.vely = 0
+			elseif(coll_ceiling(newy)) then
+				local fix = -1
+				while coll_floor(newy + fix) do
+					fix -= 1  
+				end
+				self.y = newy + fix
+				--self.falling = true
+				self.jumping = false
+				self.vely = 0
+		    else
+		    	self.y = newy
+		    end
+		end
 
 
-   --move sideways
-   if btn(1) or btn(0) and (not self.removecontrol) then
-    --move right
-    if btn(1) and not btn(0) then 
-     self.facing = "right"
-     self.velx += self.speed
-    end
-    --move left
-    if btn(0) and not btn(1) then
-     self.facing = "left"
-     self.velx -= self.speed
-    end
-    
-    --speed limit
-    if (self.velx > self.maxspeed) then
-     self.velx = self.velx - (self.velx - self.maxspeed)/2
-    elseif (self.velx < -self.maxspeed) then
-     self.velx = self.velx + (abs(self.velx) - self.maxspeed )/2
-    end
+		if self.falling then
+			if(self.stick) then
+				self.vely += gravity/6
+			else
+				self.vely += gravity
+			end
 
-   else
-    self:stopping()
-   end
-   
-   
+			local newy = self.y + self.vely
+		    if(coll_floor(newy)) then
+		    	--backtrack until not colliding
+				local fix = 1
+				while (coll_floor(newy - fix)) do
+					fix += 1  
+				end
+				self.y = ceil(newy - fix) -- 'ceil' important for making sure feet are on ground
+				self.falling = false
+				self.vely = 0
+		    else
+				self.y = newy
+		    end
+		end
 
-   if(self.velx > 0) or (self.velx < 0)then
-    self.moving = true
-    --self.sprite = 1
-   else
-    self.moving = false
-    --self.sprite = 1
-   end
 
-   if (self.moving == true) then
-    local newx = self.x + self.velx
-    --(if moving right)
-    if (newx > self.x) then 
-     if(coll_tile(newx, self.y)) then
-      local fix = 1
-      while coll_tile(newx - fix, self.y) do
-       fix += 1  
-      end
-      self.x = newx - fix
-      self.velx = 0
-     else
-      self.x = newx
-     end
+		
 
-      --sticking to wall
-      if self.falling and coll_tile(self.x+1, self.y) then
-       self.stick = true
-       --check to see if hit ground doesn't work
-       if(coll_tile(self.x, self.y+1)) then
-        self.falling = false
-        self.stick = false
-       end
-      else
-       self.stick = false
-      end
-
-      -- if moving left
-    elseif (newx < self.x) then
-     if(coll_tile(newx, self.y)) then
-      local fix = 1
-      while coll_tile(newx + fix, self.y) do
-       fix += 1  
-      end
-      self.x = newx + fix
-      self.velx = 0
-
-     else
-      self.x = newx
-     end
-
-      --sticking to wall
-      if self.falling and coll_tile(self.x-1, self.y) then
-       self.stick = true
-       --check to see if hit ground doesn't work
-       if(coll_tile(self.x, self.y+1)) then
-        self.falling = false
-        self.stick = false
-       end
-      else
-       self.stick = false
-      end
-    end
-   end
-
-   return self.x%360 --send to worldx coordinate
-  end,
+		return -self.x%352 --send to worldx coordinate
+	end,
 
   draw=function(self)
    if (self.jumping == true) then
@@ -328,7 +355,7 @@ function createcharacter(x0, y0)
     self.sprite = 147
    elseif (self.moving == true) then
    --animate walking
-    self.sprite = 1+(self.framecounter/3)%2
+    self.sprite = 144+(self.framecounter/3)%2
     self.framecounter +=1
     if(self.framecounter >= 1000) self.framecounter = 0
    else
@@ -336,9 +363,9 @@ function createcharacter(x0, y0)
    end
    --draw the player facing the correct way
    if(self.facing == "right") then
-    spr(self.sprite, 60, self.y)
+    spr(self.sprite, 60, self.y+worldy)
    else
-    spr(self.sprite, 60, self.y,1,1,true) 
+    spr(self.sprite, 60, self.y+worldy,1,1,true) 
    end
   end,
 
@@ -348,7 +375,7 @@ end
 
 function flattocylinder(x,radius0)
 	local radius = radius0 or 50
-	return 64+sin(x/360)*radius
+	return 64+sin(x/352)*radius
 end
 
 function createledge(x0,y0)
@@ -356,11 +383,11 @@ end
 
 function ledgefwidth(x)
 	--print(cos((x-180)/360)*16)
-	return cos((x-180)/360)*16
+	return ceil(cos((x-180)/352)*16)+0.5
 end
 
 function ledgesidewidth(x)
-	return sin((x-180)/360)*4
+	return sin((x-180)/352)*4
 end
 
 function brickslice(x0,y0,offset0)
@@ -374,7 +401,7 @@ function brickslice(x0,y0,offset0)
 		end,
 		
 		draw = function(self)
-			spr((flr(self.offset%8))*16,self.x,self.y,13,1)
+			spr((flr(self.offset%8))*16,self.x,self.y+worldy,13,1)
 		end,
 	}
 	return slice
@@ -401,40 +428,53 @@ end
 
 function brick(x0,y0,connected)
 	local singlebrick = {
+		x0 = x0,
 		x = flattocylinder(x0 +worldx),
 		y = y0,
 		thickness = 8,
-		closenesstocenter = 0,
+		infront = false,
+		canider = false,
+		width = 0,
 
 		move = function(self)
 			self.x = flattocylinder(x0 + worldx,54)
-			closenesstocenter = abs(self.x-64)
 		end,
 
 		draw = function(self)
-			local rotationposition = (x0+worldx)%360
+			if(self.canbecollider == true ) pal(8,7)
+			local rotationposition = (x0+worldx)%352
 			local leftsidefix = 4-((rotationposition-90)/90)*4
 			local rightsideface = ledgefwidth(rotationposition)-0.5
+			self.width = ledgefwidth(rotationposition)
 			if(rightsideface) <0.5 rightsideface = 0.5
 			if rotationposition > 90 and rotationposition <180 then 
-				sspr(0,64,16,8,flr(self.x+0.5),self.y,ledgefwidth(rotationposition)+leftsidefix,8)
-			end
-			if rotationposition >= 180 and rotationposition <280 then 
-				sspr(0,64,16,8,flr(self.x+0.5),self.y,ledgefwidth(rotationposition),8)
-			end
-
-			if connected == "left" or connected == "none" then 
-				if rotationposition < 180 and rotationposition > 80 then
-					sspr(16,64,8,8,flr(self.x+0.5+rightsideface),self.y,ledgesidewidth(rotationposition),8)
-				end
+				self.infront = true
+				sspr(0,64,16,8,flr(self.x+0.5),self.y+worldy,self.width+leftsidefix,8)
+			else
+				self.infront = false
 			end
 
 			if connected == "right" or connected == "none" then 
 				if rotationposition > 180 and rotationposition < 280 then
-					sspr(24,64,8,8,flr(self.x+0.5),self.y,ledgesidewidth(rotationposition),8)
+					sspr(24,64,8,8,flr(self.x+0.5),self.y+worldy,ledgesidewidth(rotationposition),8)
 				end
 			end
-			--print(self.x, 10,10,7)
+
+			if rotationposition >= 180 and rotationposition <280 then 
+				sspr(0,64,16,8,flr(self.x+0.5),self.y+worldy,self.width,8)
+			end
+
+			if connected == "left" or connected == "none" then 
+				if rotationposition < 180 and rotationposition > 80 then
+					sspr(16,64,8,8,flr(self.x+0.5+rightsideface),self.y+worldy,ledgesidewidth(rotationposition),8)
+				end
+			end
+
+			
+			--print(self.x)
+			pal()
+			--if(self.canbecollider == true ) print("x: "..self.x.." y: "..self.y.." w: "..self.width)
+			self.canbecollider = false
 		end,
 	}
 	return singlebrick
@@ -461,7 +501,7 @@ function createlevel(levelsource)
 				if((levelsource[i+1] == 1) and (levelsource[i-1] == 1)) sides = "both"
 			end
 
-			add(bricks, brick((i%22)*16,flr(i/22)*8,sides))
+			add(bricks, brick((i%22)*16,ceil(i/22)*8,sides))
 		end
 	end
 end
@@ -482,27 +522,45 @@ function _init()
 	bricks = {}
 
 	xspeed = 1
-	gravity = -9.8
+	gravity = 0.2
 
-	for i = -16,24 do
+	for i = -20,30 do
 		add(slices,brickslice(14,i*8,flr(i%2)*4))
 	end
+
+	correction = 0
+	collisiontiles = 0
 
 	testoffset = 0
 	backgroundx = 0
 	worldx = 0
+	worldy = 0
+	player = createcharacter(60,10)
 
-	player = createcharacter(64,64)
-
+	bugtest = 0
 	
 	--add(bricks, testbrick(0,40))
 
 	level = {
 		0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 		0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+		0,0,0,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,
+		0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,
+		0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,
+		0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,
+		0,0,0,0,1,1,0,0,0,1,0,1,1,1,0,0,0,0,0,0,0,0,
+		0,0,0,0,0,1,1,0,0,1,0,0,0,1,1,1,1,1,1,1,1,0,
+		1,0,0,0,0,0,1,1,0,0,0,0,0,1,0,0,0,0,0,0,0,1,
+		0,1,1,0,1,0,0,0,1,1,1,1,1,1.0,0,0,0,0,0,0,0,
+		0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+		0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+		1,1,1,1,1,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,
+		0,0,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,
+		0,0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,
+		0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,1,
 		0,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,1,0,0,0,0,0,
 		0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,
-		0,0,0,0,0,0,0,1,1,0,0,0,1,1,0,0,0,0,0,0,0,0,
+		1,1,0,0,0,0,0,1,1,0,0,0,1,1,0,0,0,0,0,0,0,0,
 		0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 		0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,1,1,0,0,0,
 		0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
@@ -510,31 +568,39 @@ function _init()
 		0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 		0,0,0,0,0,1,1,0,0,1,1,1,1,0,0,0,0,0,0,0,0,0,
 		0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-		0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
-		0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,
-		0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+		0,0,0,0,1,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
+		0,0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,1,
+		0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,1,
 		0,0,0,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,
 		0,0,0,0,0,0,0,0,0,0,1,1,1,1,0,0,0,0,0,0,0,0,
-		1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1
+		1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,
 	}
 	createlevel(level)
 end
 
 function _update60()
+
 	for sl in all(slices) do
 		sl:move()
 	end
 
+
+	collisiontiles = 0
 	for br in all(bricks) do
 		br:move()
+		if(br.canbecollider) collisiontiles += 1 
 	end
 
-	worldx = player:move()
+	worldx = flr(player:move())
 
+	cameraheight(player)
 	--myfirstsort(bricks)
 
 	--if(btn(0)) worldx += xspeed
 	--if(btn(1)) worldx -= xspeed
+
+	if (btnp(2)) bugtest += 1
+	if (btnp(3)) bugtest -= 1
 
 end
 
@@ -562,7 +628,14 @@ function _draw()
 		if(worldx>2000) sspr(24,64,8,8,flattocylinder(worldx-200)+1.9,64,ledgesidewidth(worldx),8)
 	end]]
 
-	--?
+	--pset(67, player.y+worldy,7)
+
+	?bugtest
+	?worldx
+	--?player.stick
+	--?player.unstickcounter
+	--?player.facing
+	
 
 end
 __gfx__
